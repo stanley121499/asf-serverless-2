@@ -44,7 +44,7 @@ export default async (req: VercelRequest, res: VercelResponse) => {
           product_data: {
             name: item.name,
           },
-          unit_amount: item.price * 100, // Stripe expects the amount in cents
+          unit_amount: item.price, // Stripe expects the amount in cents
         },
         quantity: item.quantity,
       })
