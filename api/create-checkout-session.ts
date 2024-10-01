@@ -28,10 +28,10 @@ export default async (req: VercelRequest, res: VercelResponse) => {
 
   try {
     // Extract product and customer details from the request body
-    const { name, price, currency = 'usd', customerId } = req.body;
+    const { items, customerId } = req.body;
 
-    if (!name || !price || !customerId) {
-      return res.status(400).json({ error: 'Product name, price, and customer ID are required.' });
+    if (!items || items.length === 0 || !customerId) {
+      return res.status(400).json({ error: 'Items and customer ID are required.' });
     }
 
     // // Store order details in Supabase (status set to 'pending')
@@ -45,25 +45,22 @@ export default async (req: VercelRequest, res: VercelResponse) => {
     //   throw error;
     // }
 
-    // Create a Product in Stripe
-    const product = await stripe.products.create({ name });
-
-    // Create a Price for the product
-    const priceData = await stripe.prices.create({
-      product: product.id,
-      unit_amount: price * 100, // Convert price to cents
-      currency,
-    });
-
-    // Create a Checkout Session
-    const session = await stripe.checkout.sessions.create({
-      payment_method_types: ['card'],
-      line_items: [
-        {
-          price: priceData.id,
-          quantity: 1,
+    // Create line items for the checkout session
+    const lineItems = items.map((item: { name: string; price: number; quantity: number }) => ({
+      price_data: {
+        currency: 'myr',
+        product_data: {
+          name: item.name,
         },
-      ],
+        unit_amount: item.price * 100, // Stripe expects the amount in cents
+      },
+      quantity: item.quantity,
+    }));
+
+     // Create a Checkout Session for multiple items
+     const session = await stripe.checkout.sessions.create({
+      payment_method_types: ['card'],
+      line_items: lineItems,
       mode: 'payment',
       success_url: `${process.env.CLIENT_URL}/order-success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${process.env.CLIENT_URL}/order-cancel`,
