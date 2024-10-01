@@ -20,7 +20,7 @@ export default async (req: VercelRequest, res: VercelResponse) => {
     if (req.method === 'OPTIONS') {
       return res.status(200).end();
     }
-    
+
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST');
     return res.status(405).end('Method Not Allowed');
@@ -34,16 +34,16 @@ export default async (req: VercelRequest, res: VercelResponse) => {
       return res.status(400).json({ error: 'Product name, price, and customer ID are required.' });
     }
 
-    // Store order details in Supabase (status set to 'pending')
-    const { data, error } = await supabase
-      .from('orders')
-      .insert([{ customer_id: customerId, product_name: name, price, currency, status: 'pending' }])
-      .select('*')
-      .single()
+    // // Store order details in Supabase (status set to 'pending')
+    // const { data, error } = await supabase
+    //   .from('orders')
+    //   .insert([{ customer_id: customerId, product_name: name, price, currency, status: 'pending' }])
+    //   .select('*')
+    //   .single()
 
-    if (error) {
-      throw error;
-    }
+    // if (error) {
+    //   throw error;
+    // }
 
     // Create a Product in Stripe
     const product = await stripe.products.create({ name });
@@ -69,11 +69,11 @@ export default async (req: VercelRequest, res: VercelResponse) => {
       cancel_url: `${process.env.CLIENT_URL}/order-cancel`,
     });
 
-    // Update the order with the Stripe session ID
-    await supabase
-      .from('orders')
-      .update({ stripe_session_id: session.id })
-      .eq('id', data.id);
+    // // Update the order with the Stripe session ID
+    // await supabase
+    //   .from('orders')
+    //   .update({ stripe_session_id: session.id })
+    //   .eq('id', data.id);
 
     // Return the session ID to the client
     return res.status(200).json({ id: session.id });
