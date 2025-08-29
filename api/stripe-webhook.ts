@@ -37,6 +37,12 @@ const toSafeJson = (value: unknown): Database["public"]["Tables"]["payment_event
   return String(value);
 };
 
+// Validate UUID strings to avoid DB errors
+const isValidUuid = (value: string | null | undefined): boolean => {
+  if (!value) return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+};
+
 // Endpoint to handle Stripe webhooks
 export default async (req: VercelRequest, res: VercelResponse) => {
   console.log("[webhook] request method:", req.method, "url:", req.url);
@@ -198,7 +204,7 @@ export default async (req: VercelRequest, res: VercelResponse) => {
           stripe_customer_id: typeof session.customer === "string" ? session.customer : null,
           stripe_payment_intent_id: pi.id,
           updated_at: new Date().toISOString(),
-          user_id: userIdFromMetadata,
+          user_id: isValidUuid(userIdFromMetadata) ? userIdFromMetadata : null,
           metadata: toSafeJson(session.metadata ?? {}),
           payment_method_id: typeof pi.payment_method === "string" ? pi.payment_method : null,
           payment_method_type: Array.isArray(pi.payment_method_types) && pi.payment_method_types.length > 0 ? pi.payment_method_types[0] : null,
