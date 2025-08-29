@@ -44,6 +44,7 @@ export default async (req: VercelRequest, res: VercelResponse) => {
   let event: Stripe.Event;
 
   try {
+    console.log("[webhook] stripe signature header present:", Boolean(sig));
     event = stripe.webhooks.constructEvent(
       req.body,
       sig,
@@ -54,6 +55,7 @@ export default async (req: VercelRequest, res: VercelResponse) => {
     console.error(`Webhook signature verification failed: ${message}`);
     return res.status(400).send(`Webhook Error: ${message}`);
   }
+  console.log("[webhook] received event type:", event.type);
 
   const insertPaymentEvent = async (
     stripeEvent: Stripe.Event,
@@ -115,6 +117,7 @@ export default async (req: VercelRequest, res: VercelResponse) => {
         console.error("Failed to query payments:", findErr);
       }
       if (existing?.id) {
+        console.log("[payments] existing payment found for PI", pi.id, existing.id);
         return existing.id;
       }
 
@@ -181,10 +184,86 @@ export default async (req: VercelRequest, res: VercelResponse) => {
         console.error("Failed to insert payment:", insertErr);
         return undefined;
       }
-
+      console.log("[payments] inserted payment id:", inserted?.id);
       return inserted?.id;
     } catch (e: unknown) {
       console.error("Error upserting payment from session:", e);
+      return undefined;
+    }
+  };
+
+  const upsertPaymentFromPaymentIntent = async (
+    pi: Stripe.PaymentIntent
+  ): Promise<string | undefined> => {
+    try {
+      const { data: existing, error: findErr } = await supabase
+        .from("payments")
+        .select("id")
+        .eq("stripe_payment_intent_id", pi.id)
+        .limit(1)
+        .maybeSingle();
+      if (findErr) {
+        console.error("Failed to query payments (PI):", findErr);
+      }
+      if (existing?.id) {
+        console.log("[payments] existing payment found (PI)", pi.id, existing.id);
+        return existing.id;
+      }
+
+      const latestChargeId = typeof pi.latest_charge === "string" ? pi.latest_charge : undefined;
+      let receipt_url: string | null = null;
+      if (latestChargeId) {
+        try {
+          const charge = await stripe.charges.retrieve(latestChargeId);
+          receipt_url = charge.receipt_url ?? null;
+        } catch (e: unknown) {
+          console.warn("Unable to retrieve charge receipt_url (PI)", e);
+        }
+      }
+
+      const status = mapPiStatusToPaymentStatus(pi.status);
+
+      const { data: inserted, error: insertErr } = await supabase
+        .from("payments")
+        .insert({
+          amount_total: typeof pi.amount_received === "number" && pi.amount_received > 0 ? pi.amount_received : pi.amount,
+          amount_subtotal: null,
+          amount_tax: null,
+          amount_discount: null,
+          amount_shipping: null,
+          attempt_count: 0,
+          currency: String(pi.currency ?? "myr"),
+          livemode: Boolean(event.livemode),
+          email: null,
+          name: null,
+          phone: null,
+          provider: "stripe",
+          receipt_url,
+          refund_status: "not_refunded",
+          refunded_amount: 0,
+          shipping_address: null,
+          status,
+          stripe_checkout_session_id: null,
+          stripe_customer_id: typeof pi.customer === "string" ? pi.customer : null,
+          stripe_payment_intent_id: pi.id,
+          updated_at: new Date().toISOString(),
+          user_id: null,
+          metadata: toSafeJson(pi.metadata ?? {}),
+          payment_method_id: typeof pi.payment_method === "string" ? pi.payment_method : null,
+          payment_method_type: Array.isArray(pi.payment_method_types) && pi.payment_method_types.length > 0 ? pi.payment_method_types[0] : null,
+          latest_charge_id: latestChargeId ?? null,
+        })
+        .select("id")
+        .single();
+
+      if (insertErr) {
+        console.error("Failed to insert payment (PI):", insertErr);
+        return undefined;
+      }
+      console.log("[payments] inserted payment from PI id:", inserted?.id);
+      return inserted?.id;
+    } catch (e: unknown) {
+      console.error("Error upserting payment from PaymentIntent:", e);
       return undefined;
     }
   };
@@ -226,20 +305,24 @@ export default async (req: VercelRequest, res: VercelResponse) => {
     }
     case "payment_intent.succeeded": {
       const pi = event.data.object as Stripe.PaymentIntent;
-      // Mark as succeeded if previously created
+      // Ensure payment row exists (create from PI if missing), then mark succeeded
       const { data: existing } = await supabase
         .from("payments")
         .select("id")
         .eq("stripe_payment_intent_id", pi.id)
         .limit(1)
         .maybeSingle();
-      if (existing?.id) {
+      let paymentId = existing?.id;
+      if (!paymentId) {
+        paymentId = await upsertPaymentFromPaymentIntent(pi);
+      }
+      if (paymentId) {
         await supabase
           .from("payments")
           .update({ status: "succeeded", updated_at: new Date().toISOString() })
-          .eq("id", existing.id);
+          .eq("id", paymentId);
       }
-      await insertPaymentEvent(event, existing?.id);
+      await insertPaymentEvent(event, paymentId);
       break;
     }
     default: {
