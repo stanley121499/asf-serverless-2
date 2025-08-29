@@ -39,6 +39,11 @@ const toSafeJson = (value: unknown): Database["public"]["Tables"]["payment_event
 
 // Endpoint to handle Stripe webhooks
 export default async (req: VercelRequest, res: VercelResponse) => {
+  console.log("[webhook] request method:", req.method, "url:", req.url);
+  if (req.method !== "POST") {
+    console.log("[webhook] non-POST request received; returning 200 ping");
+    return res.status(200).json({ ok: true });
+  }
   const sig = req.headers["stripe-signature"] as string;
 
   let event: Stripe.Event;
