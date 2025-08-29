@@ -66,9 +66,15 @@ export default async (req: VercelRequest, res: VercelResponse) => {
 
     // Resolve URLs: prefer client-provided, fallback to env-based defaults
     const baseClientUrl = (process.env.CLIENT_URL as string | undefined) ?? "";
-    const resolvedSuccessUrl = typeof successUrl === "string" && successUrl.trim().length > 0
-      ? successUrl
+    // Ensure success URL carries the Stripe placeholder so client receives the session_id
+    const rawSuccessUrl = typeof successUrl === "string" && successUrl.trim().length > 0
+      ? successUrl.trim()
       : `${baseClientUrl.replace(/\/$/, "")}/order-success?session_id={CHECKOUT_SESSION_ID}`;
+    const resolvedSuccessUrl = rawSuccessUrl.includes("{CHECKOUT_SESSION_ID}")
+      ? rawSuccessUrl
+      : (rawSuccessUrl.includes("?")
+        ? `${rawSuccessUrl}&session_id={CHECKOUT_SESSION_ID}`
+        : `${rawSuccessUrl}?session_id={CHECKOUT_SESSION_ID}`);
     const resolvedCancelUrl = typeof cancelUrl === "string" && cancelUrl.trim().length > 0
       ? cancelUrl
       : `${baseClientUrl.replace(/\/$/, "")}/order-cancel`;
