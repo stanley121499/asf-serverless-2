@@ -2,6 +2,9 @@
   "repository": "https://github.com/vercel/examples.git",
   "license": "MIT",
   "private": true,
+  "scripts": {
+    "supabase-sync": "npx supabase gen types typescript --project-id gswszoljvafugtdikimn > database.types.ts"
+  },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",
     "stripe": "^16.12.0"
