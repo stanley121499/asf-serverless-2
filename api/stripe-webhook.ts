@@ -50,15 +50,37 @@ export default async (req: VercelRequest, res: VercelResponse) => {
 
   try {
     console.log("[webhook] stripe signature header present:", Boolean(sig));
+    // Attempt to read raw request body for signature verification
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) {
+      chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
+    }
+    let payload: Buffer | string | undefined = undefined;
+    if (chunks.length > 0) {
+      payload = Buffer.concat(chunks);
+    } else if (typeof (req as unknown as { body?: unknown }).body === "string") {
+      payload = (req as unknown as { body: string }).body;
+    } else if ((req as unknown as { body?: unknown }).body && typeof (req as unknown as { body: unknown }).body === "object") {
+      // Last-resort reconstruction (may fail verification due to whitespace ordering)
+      payload = Buffer.from(JSON.stringify((req as unknown as { body: unknown }).body), "utf8");
+    }
+    console.log("[webhook] payload source:", chunks.length > 0 ? "stream" : typeof (req as { body?: unknown }).body);
     event = stripe.webhooks.constructEvent(
-      req.body,
+      payload ?? "",
       sig,
       process.env.STRIPE_WEBHOOK_SECRET as string
     );
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Unknown error";
     console.error(`Webhook signature verification failed: ${message}`);
-    return res.status(400).send(`Webhook Error: ${message}`);
+    // For local/dev debugging you can bypass verification by setting STRIPE_SKIP_SIGNATURE=true
+    if ((process.env.STRIPE_SKIP_SIGNATURE as string | undefined)?.toLowerCase() === "true") {
+      console.warn("[webhook] Skipping signature verification due to STRIPE_SKIP_SIGNATURE=true (DEV ONLY)");
+      // Use already-parsed body as event fallback
+      event = (req as unknown as { body: Stripe.Event }).body;
+    } else {
+      return res.status(400).send(`Webhook Error: ${message}`);
+    }
   }
   console.log("[webhook] received event type:", event.type);
 
